@@ -1,0 +1,35 @@
+name: Build Windows EXE
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build EXE
+        run: pyinstaller rpa_extractor.spec --clean --noconfirm
+
+      - name: Create release archive
+        run: |
+          Compress-Archive -Path dist/RPAExtractor.exe -DestinationPath RPAExtractor-${{ github.ref_name }}-windows.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RPAExtractor-windows
+          path: RPAExtractor-*.zip
