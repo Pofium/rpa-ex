@@ -149,14 +149,95 @@ class DropZone(QLabel):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        """Обрабатывает Drag&Drop — файлы, множество файлов или папку."""
         urls = event.mimeData().urls()
         if not urls:
             return
-        filepath = urls[0].toLocalFile()
-        if os.path.isdir(filepath):
-            self.parent()._scan_dropped_folder(filepath)
-        elif filepath.lower().endswith('.rpa'):
-            self.parent().set_rpa_file(filepath)
+
+        # Конвертируем ВСЕ URL в локальные пути
+        paths = []
+        for url in urls:
+            p = url.toLocalFile()
+            if p:
+                paths.append(p)
+
+        # Логирование drag&drop для отладки
+        try:
+            import tempfile
+            log_path = os.path.join(tempfile.gettempdir(), 'rpa-ex-debug.log')
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(f'\n=== DROP EVENT ===\n')
+                f.write(f'URLs: {len(urls)}, paths: {len(paths)}\n')
+                for p in paths:
+                    f.write(f'  {p} (isfile={os.path.isfile(p) if os.path.exists(p) else "?"}, isdir={os.path.isdir(p) if os.path.exists(p) else "?"})\n')
+        except Exception:
+            pass
+
+        if not paths:
+            return
+
+        # Если бросили папку — сканируем её
+        if len(paths) == 1 and os.path.isdir(paths[0]):
+            self.parent()._scan_dropped_folder(paths[0])
+            return
+
+        # Если бросили несколько файлов или папку с файлами — добавляем то, что можно распаковать
+        added = 0
+        had_folder = False
+        all_assets = []
+
+        for p in paths:
+            if os.path.isdir(p):
+                had_folder = True
+                # Рекурсивно собираем .rpa и .assets из папки
+                detector = FormatDetector()
+                info = detector.detect_folder(p)
+                all_assets.extend(info.assets)
+            else:
+                all_assets.append(p)
+
+        if had_folder and all_assets:
+            # Используем диалог выбора
+            from core.detector import AssetInfo
+            from ui.file_selection_dialog import FileSelectionDialog
+
+            # Конвертируем в AssetInfo
+            detector = FormatDetector()
+            asset_infos = []
+            for p in all_assets:
+                if isinstance(p, str):
+                    fmt = detector.detect_file(p)
+                    if fmt.value == 'unknown' and p.lower().endswith(('.assets', '.bundle', '.unity3d', '.resS')):
+                        from core.detector import GameFormat
+                        fmt = GameFormat.UNITY_ASSET
+                    try:
+                        size = os.path.getsize(p)
+                    except OSError:
+                        size = 0
+                    asset_infos.append(AssetInfo(path=p, size=size, format=fmt))
+
+            dialog = FileSelectionDialog(asset_infos, self.parent())
+            if dialog.exec() == FileSelectionDialog.Accepted:
+                selected = dialog.get_selected_assets()
+                for asset in selected:
+                    if asset.path not in self.parent()._rpa_files:
+                        self.parent()._rpa_files.append(asset.path)
+                        added += 1
+        else:
+            # Одиночные файлы — добавляем сразу
+            for p in all_assets:
+                if not os.path.isfile(p):
+                    continue
+                pl = p.lower()
+                if pl.endswith('.rpa') or pl.endswith(('.assets', '.bundle', '.unity3d', '.resS', '.resource')):
+                    if p not in self.parent()._rpa_files:
+                        self.parent()._rpa_files.append(p)
+                        added += 1
+
+        if added > 0:
+            self.parent()._update_file_display()
+            self.parent()._extract_btn.setEnabled(len(self.parent()._rpa_files) > 0)
+            self.parent()._status_label.setText(f'Добавлено файлов: {added}')
 
 
 class MainWindow(QWidget):
@@ -169,6 +250,21 @@ class MainWindow(QWidget):
         self._setup_ui()
         self._setup_i18n()
         self._restore_settings()
+        # Включаем drag&drop на всё окно (не только на DropZone)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """Drag&Drop на всё окно — перенаправляет в DropZone-логику."""
+        if event.mimeData().hasUrls():
+            self._drop_zone.dropEvent(event)
 
     def _setup_ui(self) -> None:
         self.setWindowTitle(i18n.t('window.title'))
@@ -210,6 +306,10 @@ class MainWindow(QWidget):
         self._folder_btn = QPushButton(i18n.t('folder.choose'))
         self._folder_btn.clicked.connect(self._browse_folder)
         folder_layout.addWidget(self._folder_btn)
+        self._scan_path_btn = QPushButton(i18n.t('folder.scan_path'))
+        self._scan_path_btn.setToolTip(i18n.t('folder.scan_path_tip'))
+        self._scan_path_btn.clicked.connect(self._scan_path_from_input)
+        folder_layout.addWidget(self._scan_path_btn)
         main_layout.addLayout(folder_layout)
 
         lang_layout = QHBoxLayout()
@@ -266,6 +366,8 @@ class MainWindow(QWidget):
             self._folder_scan_btn.setToolTip(i18n.t('file.scan_folder_tip'))
             self._folder_label.setText(i18n.t('folder.label'))
             self._folder_btn.setText(i18n.t('folder.choose'))
+            self._scan_path_btn.setText(i18n.t('folder.scan_path'))
+            self._scan_path_btn.setToolTip(i18n.t('folder.scan_path_tip'))
             self._extract_btn.setText(i18n.t('extract.button'))
             self._cancel_btn.setText(i18n.t('cancel.button'))
             self._open_folder_btn.setText(i18n.t('open.folder'))
@@ -317,9 +419,12 @@ class MainWindow(QWidget):
             start_dir = os.path.dirname(self._rpa_files[0])
         filepaths, _ = QFileDialog.getOpenFileNames(
             self,
-            'Select RPA files',
+            'Select archive files (.rpa, .assets, .bundle, .unity3d, .resource)',
             start_dir,
-            'RPA files (*.rpa);;All files (*.*)'
+            'Archive files (*.rpa *.assets *.bundle *.unity3d *.resource *.resS);;'
+            'RenPy archives (*.rpa);;'
+            'Unity assets (*.assets *.bundle *.unity3d);;'
+            'All files (*.*)'
         )
         for filepath in filepaths:
             if filepath and filepath not in self._rpa_files:
@@ -357,17 +462,66 @@ class MainWindow(QWidget):
             return
         self._scan_dropped_folder(folder)
 
+    def _scan_path_from_input(self) -> None:
+        """Сканирует папку, путь которой введён в поле."""
+        path = self._folder_edit.text().strip()
+        if not path:
+            QMessageBox.warning(self, 'Empty path', 'Введите путь к папке с игрой')
+            return
+        # Убираем кавычки если есть (когда пользователь копирует путь с пробелами)
+        path = path.strip('"').strip("'")
+        if not os.path.exists(path):
+            QMessageBox.critical(
+                self, 'Path not found',
+                f'Путь не существует:\n{path}'
+            )
+            return
+        if os.path.isfile(path):
+            # Если это файл — добавляем напрямую
+            self.set_rpa_file(path)
+            return
+        # Это папка — сканируем
+        self._scan_dropped_folder(path)
+
     def _scan_dropped_folder(self, folder: str) -> None:
         """Обработка папки с игрой: рекурсивный поиск .rpa / .assets с диалогом выбора."""
+        from core.detector import FormatDetector
         detector = FormatDetector()
-        info = detector.detect_folder(folder)
+        try:
+            info = detector.detect_folder(folder)
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                'Detection error',
+                f'Ошибка при сканировании:\n{folder}\n\n{e}'
+            )
+            return
+
+        # Отладка: пишем в лог-файл
+        try:
+            import tempfile
+            log_path = os.path.join(tempfile.gettempdir(), 'rpa-ex-debug.log')
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(f'\n--- {folder} ---\n')
+                f.write(f'Format: {info.format}\n')
+                f.write(f'Found {len(info.assets)} assets\n')
+                for a in info.assets:
+                    f.write(f'  [{a.format.value}] {a.path}\n')
+        except Exception:
+            pass
 
         if not info.assets:
+            # Соберём что ЕСТЬ в папке для отладки
+            try:
+                items = os.listdir(folder)[:30]
+            except Exception as e:
+                items = [f'ERROR: {e}']
             QMessageBox.information(
                 self,
                 'No archives found',
-                f'No .rpa or .assets archives found in:\n{folder}\n\n'
-                f'Recursive search was performed in all subfolders.'
+                f'Не найдено архивов в:\n{folder}\n\n'
+                f'Рекурсивный поиск выполнен.\n'
+                f'Первые файлы в папке:\n' + '\n'.join(items[:15])
             )
             return
 
