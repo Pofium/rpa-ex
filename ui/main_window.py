@@ -296,11 +296,11 @@ class MainWindow(QWidget):
         file_layout = QHBoxLayout()
         self._file_label = QLabel(i18n.t('file.label'))
         file_layout.addWidget(self._file_label)
-        # Clickable button (100% works) — показывает попап со списком файлов
-        self._file_edit = QPushButton('(перетащите файлы)')
-        self._file_edit.setStyleSheet('QPushButton { text-align: left; padding: 4px 8px; }')
-        self._file_edit.setCursor(Qt.PointingHandCursor)
-        self._file_edit.clicked.connect(self._on_file_label_clicked)
+        # Кастомная кликабельная кнопка со 100% надёжным кликом
+        from ui.file_list_button import FileListButton
+        self._file_edit = FileListButton(self)
+        self._file_edit.clicked_with_files.connect(self._on_file_label_clicked_with_files)
+        self._file_edit.clicked_empty.connect(self._on_file_label_clicked_empty)
         file_layout.addWidget(self._file_edit, 1)
         self._file_btn = QPushButton(i18n.t('file.browse'))
         self._file_btn.clicked.connect(self._browse_rpa)
@@ -425,24 +425,25 @@ class MainWindow(QWidget):
     def _on_folder_changed(self, text: str) -> None:
         self._output_dir = text
 
-    def _on_file_label_clicked(self, _event) -> None:
-        """Клик на метку 'X files selected' — показывает попап с галочками."""
-        if not self._rpa_files:
-            QMessageBox.information(
-                self,
-                'No files',
-                'Нет выбранных файлов.\n'
-                'Перетащите файлы или папку с игрой в окно.'
-            )
-            return
+    def _on_file_label_clicked_empty(self) -> None:
+        """Клик когда нет выбранных файлов."""
+        QMessageBox.information(
+            self,
+            'No files',
+            'Нет выбранных файлов.\n\n'
+            '1. Перетащите файлы или папку с игрой в это окно\n'
+            '2. Или нажмите "Обзор..." для выбора файлов\n'
+            '3. Или нажмите "Папка" для сканирования папки'
+        )
 
+    def _on_file_label_clicked_with_files(self, files: list) -> None:
+        """Клик когда есть файлы — открывает диалог редактирования."""
         from ui.file_selection_dialog import FileSelectionDialog
         from core.detector import AssetInfo, GameFormat, FormatDetector
 
-        # Конвертируем self._rpa_files в AssetInfo
         detector = FormatDetector()
         asset_infos = []
-        for p in self._rpa_files:
+        for p in files:
             try:
                 size = os.path.getsize(p)
             except OSError:
@@ -460,13 +461,65 @@ class MainWindow(QWidget):
             self._extract_btn.setEnabled(len(self._rpa_files) > 0)
             self._status_label.setText(f'Выбрано: {len(self._rpa_files)} файлов')
 
+    def _on_file_label_clicked(self, _event=None) -> None:
+        """Клик на метку 'X files selected' — показывает попап с галочками."""
+        # СНАЧАЛА уведомляем что мы вообще сюда попали (для отладки)
+        try:
+            import tempfile
+            log_path = os.path.join(tempfile.gettempdir(), 'rpa-ex-click.log')
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(f'CLICK: {len(self._rpa_files)} files\n')
+        except Exception:
+            pass
+
+        if not self._rpa_files:
+            QMessageBox.information(
+                self,
+                'No files',
+                f'Нет выбранных файлов!\n\n'
+                f'Перетащите файлы или папку с игрой в окно.'
+            )
+            return
+
+        from ui.file_selection_dialog import FileSelectionDialog
+        from core.detector import AssetInfo, GameFormat, FormatDetector
+
+        detector = FormatDetector()
+        asset_infos = []
+        for p in self._rpa_files:
+            try:
+                size = os.path.getsize(p)
+            except OSError:
+                size = 0
+            fmt = detector.detect_file(p)
+            if fmt.value == 'unknown' and p.lower().endswith(('.assets', '.bundle', '.unity3d', '.resS', '.resource')):
+                fmt = GameFormat.UNITY_ASSET
+            asset_infos.append(AssetInfo(path=p, size=size, format=fmt))
+
+        try:
+            dialog = FileSelectionDialog(asset_infos, self)
+            result = dialog.exec()
+            if result == FileSelectionDialog.Accepted:
+                selected = dialog.get_selected_assets()
+                self._rpa_files = [a.path for a in selected]
+                self._update_file_display()
+                self._extract_btn.setEnabled(len(self._rpa_files) > 0)
+                self._status_label.setText(f'Выбрано: {len(self._rpa_files)} файлов')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Ошибка:\n{e}')
+
     def _update_file_display(self) -> None:
-        if len(self._rpa_files) == 0:
-            self._file_edit.setText('')
-        elif len(self._rpa_files) == 1:
-            self._file_edit.setText(self._rpa_files[0])
+        # Обновляем FileListButton (он сам отрисует правильный текст)
+        if hasattr(self._file_edit, 'set_files'):
+            self._file_edit.set_files(self._rpa_files)
         else:
-            self._file_edit.setText(f'{len(self._rpa_files)} files selected')
+            # Fallback для QLabel/QPushButton
+            if len(self._rpa_files) == 0:
+                self._file_edit.setText('')
+            elif len(self._rpa_files) == 1:
+                self._file_edit.setText(self._rpa_files[0])
+            else:
+                self._file_edit.setText(f'{len(self._rpa_files)} files selected')
 
     def _browse_rpa(self) -> None:
         start_dir = ''

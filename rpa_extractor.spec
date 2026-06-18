@@ -1,11 +1,14 @@
 import sys
 import os
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
 datas = collect_data_files('PySide6')
 datas.append(('icon.ico', '.'))
+
+# Собираем ВСЕ подмодули UnityPy явно — PyInstaller сам не находит
+unitypy_submodules = collect_submodules('UnityPy')
 
 a = Analysis(
     ['app.py'],
@@ -14,11 +17,10 @@ a = Analysis(
     datas=datas,
     hiddenimports=[
         'PySide6', 'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets',
-        'UnityPy',
         'unpackers.unity_unpacker',
         'unpackers.rpa_unpacker',
         'unpackers',
-    ],
+    ] + unitypy_submodules,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
