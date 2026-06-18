@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QProgressBar, QFileDialog,
     QMessageBox, QComboBox, QApplication, QCheckBox
 )
-from PySide6.QtCore import QThread, Signal, QSettings
+from PySide6.QtCore import QThread, Signal, QSettings, Qt
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon
 
 from core.extractor import RpaUnpacker
@@ -67,6 +67,21 @@ class ExtractThread(QThread):
 
             rpa_name = os.path.splitext(os.path.basename(rpa_path))[0]
             file_output_dir = os.path.join(self.output_dir, rpa_name)
+
+            # Защита: если file_output_dir указывает на саму исходную папку
+            # (т.е. пытаемся писать рядом с исходным файлом),
+            # или папка уже занята файлами игры — создаём уникальную подпапку
+            target_dir = os.path.dirname(os.path.abspath(rpa_path))
+            if os.path.normcase(file_output_dir) == os.path.normcase(target_dir):
+                # Совпадает с исходной папкой — добавляем суффикс
+                file_output_dir = file_output_dir + '_unpacked'
+
+            # Создаём подпапку, если не существует
+            try:
+                os.makedirs(file_output_dir, exist_ok=True)
+            except (OSError, PermissionError) as e:
+                self.error.emit(f"Cannot create output dir: {e}")
+                continue
 
             try:
                 # Автовыбор распаковщика по формату файла
@@ -285,9 +300,12 @@ class MainWindow(QWidget):
         file_layout = QHBoxLayout()
         self._file_label = QLabel(i18n.t('file.label'))
         file_layout.addWidget(self._file_label)
-        self._file_edit = QLineEdit()
-        self._file_edit.setReadOnly(True)
-        file_layout.addWidget(self._file_edit)
+        # Clickable label — клик показывает попап со списком файлов
+        self._file_edit = QLabel('(перетащите файлы)')
+        self._file_edit.setStyleSheet('QLabel { color: #666; padding: 4px; border: 1px solid #ccc; background: #f9f9f9; }')
+        self._file_edit.setCursor(Qt.PointingHandCursor)
+        self._file_edit.mousePressEvent = self._on_file_label_clicked
+        file_layout.addWidget(self._file_edit, 1)
         self._file_btn = QPushButton(i18n.t('file.browse'))
         self._file_btn.clicked.connect(self._browse_rpa)
         file_layout.addWidget(self._file_btn)
@@ -410,6 +428,41 @@ class MainWindow(QWidget):
 
     def _on_folder_changed(self, text: str) -> None:
         self._output_dir = text
+
+    def _on_file_label_clicked(self, _event) -> None:
+        """Клик на метку 'X files selected' — показывает попап с галочками."""
+        if not self._rpa_files:
+            QMessageBox.information(
+                self,
+                'No files',
+                'Нет выбранных файлов.\n'
+                'Перетащите файлы или папку с игрой в окно.'
+            )
+            return
+
+        from ui.file_selection_dialog import FileSelectionDialog
+        from core.detector import AssetInfo, GameFormat, FormatDetector
+
+        # Конвертируем self._rpa_files в AssetInfo
+        detector = FormatDetector()
+        asset_infos = []
+        for p in self._rpa_files:
+            try:
+                size = os.path.getsize(p)
+            except OSError:
+                size = 0
+            fmt = detector.detect_file(p)
+            if fmt.value == 'unknown' and p.lower().endswith(('.assets', '.bundle', '.unity3d', '.resS', '.resource')):
+                fmt = GameFormat.UNITY_ASSET
+            asset_infos.append(AssetInfo(path=p, size=size, format=fmt))
+
+        dialog = FileSelectionDialog(asset_infos, self)
+        if dialog.exec() == FileSelectionDialog.Accepted:
+            selected = dialog.get_selected_assets()
+            self._rpa_files = [a.path for a in selected]
+            self._update_file_display()
+            self._extract_btn.setEnabled(len(self._rpa_files) > 0)
+            self._status_label.setText(f'Выбрано: {len(self._rpa_files)} файлов')
 
     def _update_file_display(self) -> None:
         if len(self._rpa_files) == 0:
@@ -565,14 +618,39 @@ class MainWindow(QWidget):
 
         self._update_file_display()
 
-        # Output = родительская папка игры (чтобы не путать с самой игрой)
-        # Если это корень игры, создаём подпапку "_extracted"
-        if os.path.abspath(folder) == os.path.abspath(self._output_dir):
-            # Уже установлено
-            pass
+        # Определяем правильную output_dir:
+        # ВСЕГДА создаём новую подпапку, чтобы НИКОГДА не писать в исходную папку игры
+        folder_abs = os.path.abspath(folder)
+        parent_dir = os.path.dirname(folder_abs)
+        folder_name = os.path.basename(folder_abs)
+
+        # Если folder — это *_Data подпапка Unity, выход — в корень игры + _extracted
+        # Иначе — в родительскую папку + <имя_игры>_extracted
+        if folder_name.endswith('_Data'):
+            game_root = parent_dir
         else:
-            # По умолчанию — папка с игрой
-            self._output_dir = folder
+            game_root = folder
+
+        # Берём имя игры — это либо родительский каталог *_Data, либо сам folder
+        game_name = os.path.basename(os.path.abspath(game_root))
+        # Очищаем имя от запрещённых символов
+        safe_game_name = ''.join(c if c.isalnum() or c in ' ._-' else '_' for c in game_name)
+        new_output = os.path.join(parent_dir, f'{safe_game_name}_extracted')
+
+        # Всегда перезаписываем output_dir на безопасный
+        self._output_dir = new_output
+
+        # Гарантируем что output_dir существует
+        try:
+            os.makedirs(self._output_dir, exist_ok=True)
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                'Cannot create output',
+                f'Не удалось создать папку для распаковки:\n{self._output_dir}\n\n{e}'
+            )
+            return
+
         self._folder_edit.setText(self._output_dir)
 
         self._extract_btn.setEnabled(len(self._rpa_files) > 0)

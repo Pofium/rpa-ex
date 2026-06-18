@@ -96,6 +96,26 @@ class UnityUnpacker(BaseUnpacker):
         """
         self._cancel_requested = False
         output_dir = os.path.abspath(options.output_dir)
+
+        # Защита: если output_dir == директория исходного файла,
+        # создаём подпапку _extracted чтобы не пытаться писать в исходник
+        target_dir = os.path.dirname(os.path.abspath(target))
+        if os.path.normcase(output_dir) == os.path.normcase(target_dir):
+            output_dir = os.path.join(output_dir, '_extracted')
+            _log_error(f'output_dir == target dir, using {output_dir}')
+
+        # Если output_dir == подпапка исходной папки (типа ../data/sharedassets0/),
+        # а в ней уже лежат файлы игры — тоже создаём _extracted внутри
+        parent = os.path.dirname(target_dir)
+        if os.path.normcase(output_dir).startswith(os.path.normcase(target_dir) + os.sep):
+            # output_dir внутри target_dir — безопасно
+            pass
+        elif os.path.normcase(target_dir).startswith(os.path.normcase(output_dir) + os.sep):
+            # target_dir внутри output_dir (например output_dir = корень игры)
+            # Создаём подпапку _extracted чтобы не путать с исходниками
+            output_dir = os.path.join(output_dir, '_extracted')
+            _log_error(f'target inside output_dir, using {output_dir}')
+
         os.makedirs(output_dir, exist_ok=True)
 
         result = UnpackResult(success=True, output_dir=output_dir)
