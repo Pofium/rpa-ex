@@ -1,7 +1,10 @@
 """Распаковщик Unity-ассетов через UnityPy."""
 import os
 import sys
-from typing import Optional, List, Set
+import tempfile
+import traceback
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from typing import Optional, List, Set, Tuple
 
 from core.base_unpacker import BaseUnpacker, UnpackOptions, UnpackResult, ProgressCallback
 
@@ -20,6 +23,9 @@ EXPORTABLE_TYPES = {
     'Shader': 'shader',
 }
 
+# Таймаут на экспорт одного объекта (секунды)
+PER_OBJECT_TIMEOUT = 10
+
 
 def _check_unitypy():
     """Проверяет наличие UnityPy и выбрасывает понятную ошибку."""
@@ -30,6 +36,16 @@ def _check_unitypy():
         raise ImportError(
             "UnityPy is not installed. Install with: pip install UnityPy"
         )
+
+
+def _log_error(message: str) -> None:
+    """Логирует ошибку в %TEMP%/rpa-ex-errors.log для отладки."""
+    try:
+        log_path = os.path.join(tempfile.gettempdir(), 'rpa-ex-errors.log')
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(f'\n{message}\n')
+    except Exception:
+        pass
 
 
 class UnityUnpacker(BaseUnpacker):
@@ -74,7 +90,10 @@ class UnityUnpacker(BaseUnpacker):
         options: UnpackOptions,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> UnpackResult:
-        """Распаковывает Unity-ассеты в указанную папку."""
+        """Распаковывает Unity-ассеты в указанную папку.
+        Каждый объект обрабатывается с таймаутом PER_OBJECT_TIMEOUT секунд,
+        чтобы один зависший объект не блокировал всю распаковку.
+        """
         self._cancel_requested = False
         output_dir = os.path.abspath(options.output_dir)
         os.makedirs(output_dir, exist_ok=True)
@@ -87,34 +106,24 @@ class UnityUnpacker(BaseUnpacker):
         except Exception as e:
             result.success = False
             result.errors.append(f"Cannot load Unity file: {e}")
+            _log_error(f"LOAD ERROR for {target}: {e}")
             return result
 
-        # Собираем объекты для экспорта
         objects = list(env.objects)
         total = len(objects)
 
-        # Если ничего нет — это всё ещё валидный пустой файл
         if total == 0:
             return result
 
-        # Поддерживаемые для экспорта типы
         supported_types: Set[str] = set(EXPORTABLE_TYPES.keys())
-
-        # Подсчёт: оставляем только экспортируемые
         exportable = [o for o in objects if o.type.name in supported_types]
         skipped_count = total - len(exportable)
 
-        for i, obj in enumerate(exportable):
-            if self._cancel_requested:
-                result.errors.append("Cancelled by user")
-                break
-
+        def _export_one(obj) -> Tuple[str, str, Optional[str]]:
+            """Экспортирует один объект. Возвращает (filename, tname, error_msg)."""
             tname = obj.type.name
             ext = EXPORTABLE_TYPES[tname]
             filename = f'{tname}_{obj.path_id}.{ext}'
-
-            if progress_callback:
-                progress_callback(filename, i + 1, len(exportable))
 
             try:
                 if tname == 'Texture2D':
@@ -134,18 +143,44 @@ class UnityUnpacker(BaseUnpacker):
                 elif tname == 'Shader':
                     self._export_shader(obj, filename, output_dir)
                 else:
-                    continue
+                    return (filename, tname, 'unsupported type')
 
-                result.files_extracted.append(filename)
+                full_path = os.path.join(output_dir, filename)
+                if not os.path.exists(full_path) or os.path.getsize(full_path) == 0:
+                    return (filename, tname, 'no data (empty or missing)')
+                return (filename, tname, None)
             except Exception as e:
-                result.skipped.append({
-                    'path': filename,
-                    'reason': f'{tname}: {e}',
-                })
-                if not options.continue_on_error:
-                    result.success = False
-                    result.errors.append(f"Error at {filename}: {e}")
-                    return result
+                return (filename, tname, f'{type(e).__name__}: {e}')
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            for i, obj in enumerate(exportable):
+                if self._cancel_requested:
+                    result.errors.append("Cancelled by user")
+                    break
+
+                tname = obj.type.name
+                filename = f'{tname}_{obj.path_id}.{EXPORTABLE_TYPES[tname]}'
+
+                if progress_callback:
+                    progress_callback(filename, i + 1, len(exportable))
+
+                future = executor.submit(_export_one, obj)
+                try:
+                    fname, tn, err = future.result(timeout=PER_OBJECT_TIMEOUT)
+                    if err is None:
+                        result.files_extracted.append(fname)
+                    else:
+                        result.skipped.append({
+                            'path': fname,
+                            'reason': f'{tn}: {err}',
+                        })
+                        _log_error(f'SKIP {fname}: {err}')
+                except FutureTimeout:
+                    result.skipped.append({
+                        'path': filename,
+                        'reason': f'{tname}: timeout ({PER_OBJECT_TIMEOUT}s)',
+                    })
+                    _log_error(f'TIMEOUT {filename} after {PER_OBJECT_TIMEOUT}s')
 
         if skipped_count > 0:
             result.skipped.append({

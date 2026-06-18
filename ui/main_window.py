@@ -295,6 +295,10 @@ class MainWindow(QWidget):
         self._folder_scan_btn.setToolTip(i18n.t('file.scan_folder_tip'))
         self._folder_scan_btn.clicked.connect(self._browse_game_folder)
         file_layout.addWidget(self._folder_scan_btn)
+        self._clear_files_btn = QPushButton(i18n.t('file.clear'))
+        self._clear_files_btn.setToolTip(i18n.t('file.clear_tip'))
+        self._clear_files_btn.clicked.connect(self._clear_files)
+        file_layout.addWidget(self._clear_files_btn)
         main_layout.addLayout(file_layout)
 
         folder_layout = QHBoxLayout()
@@ -364,6 +368,8 @@ class MainWindow(QWidget):
             self._file_btn.setText(i18n.t('file.browse'))
             self._folder_scan_btn.setText(i18n.t('file.scan_folder'))
             self._folder_scan_btn.setToolTip(i18n.t('file.scan_folder_tip'))
+            self._clear_files_btn.setText(i18n.t('file.clear'))
+            self._clear_files_btn.setToolTip(i18n.t('file.clear_tip'))
             self._folder_label.setText(i18n.t('folder.label'))
             self._folder_btn.setText(i18n.t('folder.choose'))
             self._scan_path_btn.setText(i18n.t('folder.scan_path'))
@@ -461,6 +467,23 @@ class MainWindow(QWidget):
         if not folder:
             return
         self._scan_dropped_folder(folder)
+
+    def _clear_files(self) -> None:
+        """Очищает список выбранных файлов."""
+        if not self._rpa_files:
+            return
+        reply = QMessageBox.question(
+            self,
+            'Clear files',
+            f'Удалить все {len(self._rpa_files)} выбранных файлов из списка?',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self._rpa_files.clear()
+            self._update_file_display()
+            self._extract_btn.setEnabled(False)
+            self._status_label.setText('Список очищен')
 
     def _scan_path_from_input(self) -> None:
         """Сканирует папку, путь которой введён в поле."""
