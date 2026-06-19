@@ -54,6 +54,15 @@ class FormatDetector:
         if header.startswith(self.RPA_HEADER):
             return GameFormat.RENPY_RPA
 
+        # UnityFS bundle — Unity 5+ asset bundle, часто без расширения
+        if header.startswith(b'UnityFS'):
+            return GameFormat.UNITY_ASSET
+
+        # Старый Unity Asset Bundle (без UnityFS префикса)
+        if len(header) > 4 and header[:4] in (b'\x00\x00\x00\x1c', b'\x00\x00\x00\x0c'):
+            # Тоже может быть asset bundle
+            return GameFormat.UNITY_ASSET
+
         return GameFormat.UNKNOWN
 
     def detect_folder(self, folder: str) -> GameInfo:
@@ -95,6 +104,10 @@ class FormatDetector:
                     is_renpy = True
                     continue
 
+                # Пропускаем .manifest файлы (служебные Unity)
+                if fl.endswith('.manifest'):
+                    continue
+
                 # Ищем .rpa — основной формат Ren'Py
                 if fl.endswith('.rpa'):
                     assets.append(AssetInfo(
@@ -116,9 +129,11 @@ class FormatDetector:
                     or fl.startswith('unity') or fl == 'app.info' or fl == 'boot.config'
                 ):
                     is_unity = True
-                elif fl == 'screen' or 'screenshot' in fl:
-                    # PNG-обложки Unity тоже могут быть полезны
-                    pass
+                else:
+                    # Проверяем UnityFS bundle (StreamingAssets/*/<hash> без расширения)
+                    fmt = self.detect_file(full_path)
+                    if fmt == GameFormat.UNITY_ASSET:
+                        is_unity = True
 
                 if is_unity:
                     assets.append(AssetInfo(
