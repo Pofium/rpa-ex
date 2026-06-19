@@ -1,6 +1,6 @@
 import sys
 import os
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
 block_cipher = None
 
@@ -9,13 +9,16 @@ datas = collect_data_files('PySide6')
 datas += collect_data_files('UnityPy')
 datas.append(('icon.ico', '.'))
 
+# fmod.dll нужен UnityPy для декодирования текстур и аудио
+binaries = collect_dynamic_libs('fmod_toolkit')
+
 # Собираем ВСЕ подмодули UnityPy явно — PyInstaller сам не находит
 unitypy_submodules = collect_submodules('UnityPy')
 
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=[
         'PySide6', 'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets',

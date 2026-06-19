@@ -98,22 +98,31 @@ class UnityUnpacker(BaseUnpacker):
         self._cancel_requested = False
         output_dir = os.path.abspath(options.output_dir)
 
-        # Защита: если output_dir == директория исходного файла,
-        # создаём подпапку _extracted чтобы не пытаться писать в исходник
+        # Защита: ВСЕГДА создаём безопасную подпапку если есть риск писать в исходники
         target_dir = os.path.dirname(os.path.abspath(target))
-        if os.path.normcase(output_dir) == os.path.normcase(target_dir):
-            output_dir = os.path.join(output_dir, '_extracted')
-            _log_error(f'output_dir == target dir, using {output_dir}')
+        target_dir_norm = os.path.normcase(target_dir)
+        output_dir_norm = os.path.normcase(output_dir)
 
-        # Если output_dir == подпапка исходной папки (типа ../data/sharedassets0/),
-        # а в ней уже лежат файлы игры — тоже создаём _extracted внутри
-        parent = os.path.dirname(target_dir)
-        if os.path.normcase(output_dir).startswith(os.path.normcase(target_dir) + os.sep):
-            # output_dir внутри target_dir — безопасно
-            pass
-        elif os.path.normcase(target_dir).startswith(os.path.normcase(output_dir) + os.sep):
-            # target_dir внутри output_dir (например output_dir = корень игры)
-            # Создаём подпапку _extracted чтобы не путать с исходниками
+        # 1. output_dir совпадает с target_dir — добавляем _extracted
+        if output_dir_norm == target_dir_norm:
+            output_dir = os.path.join(output_dir, '_extracted')
+            _log_error(f'output_dir == target_dir, using {output_dir}')
+
+        # 2. output_dir ВНУТРИ target_dir (типа ../Data/sharedassets0/) —
+        # это то что делает ExtractThread для каждого файла. Но если файлов
+        # с таким именем нет в target_dir — безопасно. Если есть — опасно.
+        # Всегда используем имя архива как подпапку для ясности
+        target_name = os.path.splitext(os.path.basename(target))[0]
+        if output_dir_norm.startswith(target_dir_norm + os.sep):
+            # Если последний компонент output_dir совпадает с именем архива — норм
+            last_part = os.path.basename(output_dir)
+            if last_part != target_name:
+                output_dir = os.path.join(output_dir, target_name)
+                _log_error(f'output_dir inside target, using {output_dir}')
+
+        # 3. target_dir ВНУТРИ output_dir (output_dir = корень игры) —
+        # создаём _extracted
+        elif target_dir_norm.startswith(output_dir_norm + os.sep):
             output_dir = os.path.join(output_dir, '_extracted')
             _log_error(f'target inside output_dir, using {output_dir}')
 
@@ -238,16 +247,69 @@ class UnityUnpacker(BaseUnpacker):
         return os.path.join(output_dir, safe_name)
 
     def _export_texture(self, obj, filename: str, output_dir: str) -> None:
-        data = obj.read()
-        img = data.image
+        try:
+            data = obj.read()
+        except Exception as e:
+            raise RuntimeError(f'obj.read() failed: {type(e).__name__}: {e}')
+
+        # Некоторые текстуры имеют image=None (битые, или требуют fmod)
+        img = getattr(data, 'image', None)
+        if img is None:
+            # Попробуем сохранить raw texture данные если есть
+            try:
+                raw = getattr(data, 'image_data', None) or getattr(data, 'm_StreamData', None)
+                if raw:
+                    path = os.path.join(output_dir, filename + '.bin')
+                    with open(path, 'wb') as f:
+                        f.write(bytes(raw) if not isinstance(raw, (bytes, bytearray)) else raw)
+                    return
+            except Exception:
+                pass
+            raise RuntimeError('Texture2D has no image (fmod missing or corrupt)')
+
         path = os.path.join(output_dir, filename)
-        img.save(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            # fmod делает распаковку через временный файл — ставим TMPDIR на наш tempdir
+            import tempfile
+            old_tmp = os.environ.get('TMPDIR', None)
+            new_tmp = os.path.abspath(tempfile.gettempdir())
+            os.environ['TMPDIR'] = new_tmp
+            try:
+                img.save(path)
+            finally:
+                if old_tmp:
+                    os.environ['TMPDIR'] = old_tmp
+                else:
+                    os.environ.pop('TMPDIR', None)
+        except Exception as e:
+            raise RuntimeError(f'save failed: {type(e).__name__}: {e}')
 
     def _export_sprite(self, obj, filename: str, output_dir: str) -> None:
-        data = obj.read()
-        if hasattr(data, 'image') and data.image:
-            path = os.path.join(output_dir, filename)
-            data.image.save(path)
+        try:
+            data = obj.read()
+        except Exception as e:
+            raise RuntimeError(f'obj.read() failed: {type(e).__name__}: {e}')
+
+        img = getattr(data, 'image', None)
+        if not img:
+            raise RuntimeError('Sprite has no image (fmod missing or corrupt)')
+        path = os.path.join(output_dir, filename)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            import tempfile
+            old_tmp = os.environ.get('TMPDIR', None)
+            new_tmp = os.path.abspath(tempfile.gettempdir())
+            os.environ['TMPDIR'] = new_tmp
+            try:
+                img.save(path)
+            finally:
+                if old_tmp:
+                    os.environ['TMPDIR'] = old_tmp
+                else:
+                    os.environ.pop('TMPDIR', None)
+        except Exception as e:
+            raise RuntimeError(f'save failed: {type(e).__name__}: {e}')
 
     def _export_text(self, obj, filename: str, output_dir: str) -> None:
         data = obj.read()
