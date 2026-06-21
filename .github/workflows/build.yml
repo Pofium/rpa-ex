@@ -22,7 +22,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Build EXE
-        run: pyinstaller rpa_extractor.spec --clean --noconfirm
+        run: pyinstaller ga_extractor.spec --clean --noconfirm
 
       - name: Create release archive
         run: |

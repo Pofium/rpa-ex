@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.12.1 (2026-06-21) — Fix UI naming + Unity scene-based organization
+
+### Fixed
+- **RU window title** в GUI: было «Распаковщик RPA», стало «GA Extractor — Game Archive Extractor»
+- **EN window title** обновлён до «GA Extractor — Game Archive Extractor»
+- **Drop hint** теперь перечисляет все поддерживаемые форматы (не только .rpa)
+- **`err.invalid.header`** — generic для всех движков (был «Invalid RPA file format»)
+- **`.github/workflows/build.yml`** — использовал `rpa_extractor.spec` (несуществующий), теперь `ga_extractor.spec`
+
+### Changed
+- **`app.py`** — добавлены `setOrganizationName`, `setApplicationVersion`, `setApplicationDisplayName`
+- **Unity output structure** — scene-based organization:
+  - `Scenes/<SceneName>/<Type>/<filename>` для ассетов привязанных к сцене
+  - `Scenes/_Common/<Type>/<filename>` для ассетов в нескольких сценах
+  - `Scenes/_Unreferenced/<Type>/<filename>` для несвязанных
+  - Автодетект имён сцен через `globalgamemanagers` → BuildSettings
+  - Поддержка обоих форматов BuildSettings: новый `m_Scenes` и старый `scenes`
+- **Unity naming** — использует `m_Name` как имя файла (с фильтром MD5-хешей)
+- **Empty folders cleanup** — удаляются автоматически после распаковки
+  - На Serena Dark Confessions: **6805 пустых папок → 0**
+
+### Added
+- **22 теста** для Unity helpers в `tests/test_unity_helpers.py`
+- Все 126 тестов проходят
+
 ## v0.12.0 (2026-06-20) — Multi-engine format support
 
 ### Added (MAJOR)

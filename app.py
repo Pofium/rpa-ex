@@ -1,11 +1,16 @@
 import sys
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QCoreApplication
 from ui.main_window import MainWindow
 
 
 def main() -> None:
     app = QApplication(sys.argv)
-    app.setApplicationName('GA Extractor')
+    # GA Extractor — Game Archive Extractor
+    QCoreApplication.setOrganizationName('GAExtractor')
+    QCoreApplication.setApplicationName('GA Extractor')
+    QCoreApplication.setApplicationVersion('0.12.1')
+    app.setApplicationDisplayName('GA Extractor — Game Archive Extractor')
 
     window = MainWindow()
     window.show()

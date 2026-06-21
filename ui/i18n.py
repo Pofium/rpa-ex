@@ -4,12 +4,17 @@ import locale
 
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
     'ru': {
-        'window.title': 'Распаковщик RPA',
-        'drop.hint': 'Перетащите .rpa, .assets, .bundle (Unity) или папку с игрой',
+        'window.title': 'GA Extractor — Game Archive Extractor',
+        'drop.hint': (
+            'Перетащите .rpa, .xp3, .rgss3a, .assets, .bundle, '
+            '.gax, .pck, .wolf, .ttarch и др. или папку с игрой'
+        ),
         'file.label': 'Файл:',
         'file.browse': 'Обзор...',
         'file.scan_folder': 'Папка',
-        'file.scan_folder_tip': 'Выбрать папку с игрой (автодетект .rpa/.assets)',
+        'file.scan_folder_tip': (
+            'Выбрать папку с игрой (автодетект архивов всех поддерживаемых движков)'
+        ),
         'file.clear': 'Очистить',
         'file.clear_tip': 'Очистить список выбранных файлов',
         'folder.label': 'Папка назначения:',
@@ -30,7 +35,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'overwrite.yes': 'Да',
         'overwrite.no': 'Нет',
         'overwrite.subfolder': 'В подпапку',
-        'err.invalid.header': 'Неверный формат файла RPA',
+        'err.invalid.header': 'Неверный формат файла или архив повреждён',
         'err.invalid.index': 'Архив поврежден (не удалось прочитать индекс)',
         'err.permission': 'Нет прав на запись в папку',
         'err.disk.space': 'Недостаточно места на диске',
@@ -84,12 +89,17 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         ),
     },
     'en': {
-        'window.title': 'GA Extractor',
-        'drop.hint': 'Drop .rpa, .assets, .bundle (Unity) or game folder',
+        'window.title': 'GA Extractor — Game Archive Extractor',
+        'drop.hint': (
+            'Drop .rpa, .xp3, .rgss3a, .assets, .bundle, '
+            '.gax, .pck, .wolf, .ttarch, etc. or game folder'
+        ),
         'file.label': 'File:',
         'file.browse': 'Browse...',
         'file.scan_folder': 'Folder',
-        'file.scan_folder_tip': 'Select game folder (auto-detect .rpa/.assets)',
+        'file.scan_folder_tip': (
+            'Select game folder (auto-detect archives of all supported engines)'
+        ),
         'file.clear': 'Clear',
         'file.clear_tip': 'Clear selected files list',
         'folder.label': 'Destination:',
@@ -110,7 +120,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'overwrite.yes': 'Yes',
         'overwrite.no': 'No',
         'overwrite.subfolder': 'To subfolder',
-        'err.invalid.header': 'Invalid RPA file format',
+        'err.invalid.header': 'Invalid file format or corrupted archive',
         'err.invalid.index': 'Archive is corrupted (cannot read index)',
         'err.permission': 'No write permission to folder',
         'err.disk.space': 'Not enough disk space',
