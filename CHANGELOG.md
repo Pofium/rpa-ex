@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.12.2 (2026-06-22) — Fix Qt6WebEngineCore decompression + .pak support
+
+### Fixed
+- **EXE не запускался**: `Failed to extract PySide6\Qt6WebEngineCore.dll: decompression resulted in return code 0`
+  - Отключён UPX в [ga_extractor.spec](file:///c:/Projects/rpa-ex/ga_extractor.spec)
+  - UPX не справлялся со сжатием Qt6WebEngineCore.dll и других больших Qt DLL
+  - EXE больше (~280 MB), но запускается надёжно
+- **`.pak` не распаковывался**: теперь работает полноценно через [pyuepak](https://pypi.org/project/pyuepak/) (Zlib/Gzip/Oodle/LZ4, AES)
+
+### Added
+- **Полная поддержка Unreal Engine .pak v1-v12** через `pyuepak`
+- **Zlib / Gzip / Oodle / LZ4** декомпрессия (Oodle через `oo2core_9_win64.dll`)
+- **AES-256 шифрование** (требует ключ)
+- **6 новых тестов** в `tests/test_pak_unpacker.py`
+- `pyuepak>=0.2.8` и `cryptography>=42.0.0` в [requirements.txt](file:///c:/Projects/rpa-ex/requirements.txt)
+- `oo2core_9_win64.dll` теперь включён в EXE
+
+### Changed
+- [unpackers/pak_unpacker.py](file:///c:/Projects/rpa-ex/unpackers/pak_unpacker.py) — полностью переписан через pyuepak (вместо заглушки)
+- [ga_extractor.spec](file:///c:/Projects/rpa-ex/ga_extractor.spec) — добавлены `pyuepak` в datas/binaries/hiddenimports
+
+### Stats
+- 132/132 тестов проходят
+- EXE: 280 MB (без UPX)
+
 ## v0.12.1 (2026-06-21) — Fix UI naming + Unity scene-based organization
 
 ### Fixed

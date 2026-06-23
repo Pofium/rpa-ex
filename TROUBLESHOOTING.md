@@ -83,6 +83,19 @@ pip install fmod_toolkit
 1. Скачайте `fmod.dll` из [UnityPy releases](https://github.com/K0lb3/UnityPy/releases)
 2. Положите в корень проекта или в `C:\Windows\System32`
 
+## Qt6WebEngineCore decompression error
+
+**Симптом:**
+```
+Failed to extract PySide6\Qt6WebEngineCore.dll: decompression resulted in return code 0!
+```
+
+**Причина:** PyInstaller UPX не справляется со сжатием Qt6WebEngineCore.dll и других больших Qt DLL. EXE падает при запуске.
+
+**Решение:** Уже исправлено в **v0.12.2+**. UPX отключён в `ga_extractor.spec`.
+
+Если собираете EXE самостоятельно — замените `upx=True` на `upx=False` в [ga_extractor.spec](file:///c:/Projects/rpa-ex/ga_extractor.spec). EXE будет ~280 MB, но запустится.
+
 ---
 
 ## EXE не запускается / Windows SmartScreen

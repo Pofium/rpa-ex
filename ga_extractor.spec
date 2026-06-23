@@ -7,6 +7,8 @@ block_cipher = None
 datas = collect_data_files('PySide6')
 # UnityPy требует бинарные ресурсы (lzma.tpk, brotli.tpk, etc.) для декодирования
 datas += collect_data_files('UnityPy')
+# pyuepak может понадобиться bundled data
+datas += collect_data_files('pyuepak')
 # archspec (зависимость numpy → UnityPy) содержит JSON схемы процессоров
 datas += collect_data_files('archspec')
 # numpy динамические библиотеки
@@ -15,6 +17,8 @@ datas.append(('icon.ico', '.'))
 
 # fmod.dll нужен UnityPy для декодирования текстур и аудио
 binaries = collect_dynamic_libs('fmod_toolkit')
+# pyuepak требует oo2core_9_win64.dll для декомпрессии Oodle
+binaries += collect_dynamic_libs('pyuepak')
 # numpy.dll, openblas.dll и пр.
 binaries += collect_dynamic_libs('numpy')
 
@@ -41,6 +45,8 @@ a = Analysis(
         'core.rpgm_decrypter',
         'core.rpgm_reader',
         'core.gax_key_extractor',
+        # pyuepak и подмодули для .pak
+        'pyuepak', 'pyuepak.pak', 'pyuepak.entry',
         'unpackers',
     ] + unitypy_submodules,
     hookspath=[],
@@ -66,7 +72,10 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX отключён: сжатие Qt6WebEngineCore.dll и других больших Qt DLL
+    # приводит к ошибке "decompression resulted in return code 0" при запуске.
+    # Без UPX EXE больше (~280 MB), но запускается надёжно.
+    upx=False,
     console=False,
     icon='icon.ico',
     disable_windowed_traceback=False,

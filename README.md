@@ -21,7 +21,7 @@
 | **CatSystem2** | `.gax`, `.pck` | ⚠️ Частично (см. ниже) |
 | **Telltale** | `.ttarch` | 🔍 Детект |
 | **Wolf RPG Editor** | `.wolf` | 🔍 Детект |
-| **Unreal Engine** | `.pak` | 🔍 Детект |
+| **Unreal Engine** | `.pak` | ✅ Полная (v1-v12, Zlib/Gzip/Oodle/LZ4, AES*) |
 | **Godot Engine** | `.pck` | 🔍 Детект |
 | **7-Zip fallback** | `.7z`, `.zip`, `.rar`, `.tar`, `.gz`, `.bz2`, `.xz` | ✅ Полная (через 7z CLI) |
 
